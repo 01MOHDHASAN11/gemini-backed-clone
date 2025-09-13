@@ -1,0 +1,110 @@
+const express = require('express');
+const bcrypt = require('bcryptjs');
+const { User, Otp } = require('../models');
+const crypto = require("crypto")
+const router = express.Router();
+const jwt = require("jsonwebtoken")
+require('dotenv').config({ path: `${process.cwd()}/.env` });
+router.post('/auth/signup', async (req, res) => {
+  try {
+    const { mobile, password } = req.body;
+    if (!mobile || !password) {
+      return res.status(400).json({ status: 'error', message: 'Mobile and password are required' });
+    }
+    const existingUser = await User.findOne({ where: { mobile } });
+    if (existingUser) {
+      return res.status(409).json({ status: 'error', message: 'Mobile number already exists' });
+    }
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const user = await User.create({
+      mobile,
+      password: hashedPassword,
+      subscriptionTier: 'basic',
+      dailyPromptsUsed: 0
+    });
+    return res.status(201).json({ status: 'success', message: 'User created', userId: user.id });
+  } catch (error) {
+    console.error('Signup error:', error);
+    return res.status(500).json({ status: 'error', message: error.message });
+  }
+});
+
+
+router.post("/auth/send-opt",async(req,res)=>{
+    try {
+        const {mobile} = req.body;
+        if(!mobile){
+            return res.status(400).json({status:"error",message:"Mobile number is required"});
+        }
+        const user = await User.findOne({where:{mobile}})
+        if(!user){
+            return res.status(404).json({status:"error",message:"User not found"});
+        }
+        const otpCode = crypto.randomInt(100000,999999).toString();
+        const expiresAt = new Date(Date.now()+5*60*1000);
+        await Otp.create({
+            mobile,
+            code:otpCode,
+            expiresAt
+        })
+        console.log(`OTP for ${mobile} is ${otpCode}`);
+        return res.status(200).json({status:"success",message:"OTP sent successfully",opt:otpCode,mobile});
+    } catch (error) {
+        console.log("Error generating OTP",error.message)
+        return res.status(500).json({status:"error",message:error.message})
+    }
+})
+
+router.post("/auth/verify-otp",async(req,res)=>{
+    try {
+        const {mobile,code} = req.body;
+        if(!mobile || !code){
+            return res.status(400).json({status:"error",message:"Mobile and code are required"});
+        }
+        const otpRecord = await Otp.findOne({where:{mobile,code}})
+        if(!otpRecord){
+            return res.status(400).json({status:"error",message:"Invalid OTP"});
+        }
+        if(otpRecord.expiresAt<new Date()){
+            otpRecord.destroy()
+            return res.status(400).json({status:"error",message:"OTP has expired"});
+        }
+        const user = await User.findOne({where:{mobile}})
+        if(!user){
+            return res.status(404).json({status:"error",message:"User not found"});
+        }
+        const token = jwt.sign({userId:user.id},process.env.JWT_SECRET_KEY,{expiresIn:"1h"})
+        otpRecord.destroy()
+        return res.status(200).json({status:"success",message:"OTP verified successfully",token});
+    } catch (error) {
+        console.log("Error verifying OTP",error.message)
+        return res.status(500).json({status:"error",message:error.message})
+    }
+})
+
+
+router.post("/auth/login",async(req,res)=>{
+    try {
+        console.log("In login route")
+        const {mobile,password} = req.body
+        console.log(mobile,password)
+        if(!mobile || !password){
+            return res.status(400).json({status:"error",message:"Mobile and password are required"});
+        }
+        const user = await User.findOne({where:{mobile}})
+        if(!user){
+            return res.status(404).json({status:"error",message:"User not found"});
+        }
+        const isPasswordValid = await bcrypt.compare(password,user.password)
+        if(!user || !isPasswordValid){
+            return res.status(401).json({status:"error",message:"Invalid credentials"});
+        }
+        const token = jwt.sign({userId:user.id},process.env.JWT_SECRET_KEY,{expiresIn:"1h"})
+        return res.status(200).json({status:"success",message:"Login successful",token});
+    } catch (error) {
+        console.log("Error during login",error.message)
+        return res.status(500).json({status:"error",message:error.message}
+        )
+    }
+})
+module.exports = router;
