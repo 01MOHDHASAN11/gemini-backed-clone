@@ -14,7 +14,11 @@ User.init({
     type: DataTypes.ENUM('basic', 'pro'),
     defaultValue: 'basic'
   },
-  dailyPromptsUsed: { type: DataTypes.INTEGER, defaultValue: 0 }
+  dailyPromptsUsed: { type: DataTypes.INTEGER, defaultValue: 0 },
+   lastPromptDate: { 
+    type: DataTypes.DATE, 
+    defaultValue: DataTypes.NOW 
+  },
 }, {
   sequelize,
   modelName: 'User'

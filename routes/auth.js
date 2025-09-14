@@ -6,6 +6,7 @@ const router = express.Router();
 const jwt = require("jsonwebtoken");
 const NodeCache = require('node-cache');
 const cache = new NodeCache({ stdTTL: 300 });
+const { geminiQueue } = require('../queue/geminiQueue');
 const authenticate = require("../middleware/authenticate");
 const { title } = require("process");
 
@@ -234,5 +235,79 @@ router.get("/chatroom/:id",authenticate,async(req,res)=>{
         return res.status(500).json({status:"error",message:error.message})
     }
 })
+
+
+
+// Add this endpoint to your existing routes
+router.post("/chatroom/:id/message", authenticate, async (req, res) => {
+  try {
+    const { id: chatroomId } = req.params;
+    const { message: userMessage } = req.body;
+    
+    if (!userMessage) {
+      return res.status(400).json({ 
+        status: "error", 
+        message: "Message is required" 
+      });
+    }
+
+    // Check if chatroom exists and belongs to user
+    const chatroom = await Chatroom.findOne({
+      where: { id: chatroomId, userId: req.user.id }
+    });
+    
+    if (!chatroom) {
+      return res.status(404).json({ 
+        status: "error", 
+        message: "Chatroom not found" 
+      });
+    }
+
+    // Check rate limiting for basic users
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    if (req.user.subscriptionTier === 'basic') {
+      // Reset daily count if it's a new day
+      if (req.user.lastPromptDate < today) {
+        req.user.dailyPromptsUsed = 0;
+        req.user.lastPromptDate = new Date();
+        await req.user.save();
+      }
+      
+      if (req.user.dailyPromptsUsed >= 5) {
+        return res.status(429).json({ 
+          status: "error", 
+          message: "Daily limit exceeded. Upgrade to pro for unlimited access." 
+        });
+      }
+    }
+
+    // Add job to queue
+    await geminiQueue.add('process-message', {
+      userMessage,
+      chatroomId,
+      userId: req.user.id
+    });
+
+    // Store user message immediately
+    await Message.create({
+      chatroomId,
+      userMessage,
+      aiResponse: null // Will be updated by worker
+    });
+
+    return res.status(202).json({ 
+      status: "success", 
+      message: "Message is being processed" 
+    });
+  } catch (error) {
+    console.error("Error sending message:", error.message);
+    return res.status(500).json({ 
+      status: "error", 
+      message: error.message 
+    });
+  }
+});
 
 module.exports = router;
