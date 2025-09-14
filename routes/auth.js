@@ -1,10 +1,15 @@
 const express = require("express");
 const bcrypt = require("bcryptjs");
-const { User, Otp, Chatroom } = require("../models");
+const { User, Otp, Chatroom, Message } = require("../models");
 const crypto = require("crypto");
 const router = express.Router();
 const jwt = require("jsonwebtoken");
+const NodeCache = require('node-cache');
+const cache = new NodeCache({ stdTTL: 300 });
 const authenticate = require("../middleware/authenticate");
+const { title } = require("process");
+
+
 require("dotenv").config({ path: `${process.cwd()}/.env` });
 router.post("/auth/signup", async (req, res) => {
   try {
@@ -168,4 +173,66 @@ router.post("/chatroom", authenticate, async (req, res) => {
     return res.status(500).json({ status: "error", message: error.message });
   }
 });
+ 
+
+router.get("/chatroom", authenticate, async (req, res) => {
+  try {
+    const cacheKey = `chatrooms_${req.user.id}`;
+    let chatrooms = cache.get(cacheKey);
+
+    if (!chatrooms) {
+      chatrooms = await Chatroom.findAll({
+        where: { userId: req.user.id },
+        attributes: ['id', 'title', 'createdAt'], 
+        order: [['createdAt', 'DESC']], 
+      });
+      cache.set(cacheKey, chatrooms);
+    }
+
+    return res.status(200).json({
+      status: "success",
+      message: "Chatrooms retrieved successfully",
+      chatrooms,
+    });
+  } catch (error) {
+    console.error("Error fetching chatrooms:", error.message);
+    return res.status(500).json({ status: "error", message: error.message });
+  }
+});
+
+router.get("/chatroom/:id",authenticate,async(req,res)=>{
+    try {
+        const chatroom = await Chatroom.findOne({
+            where:{
+                id:req.params.id,
+                userId:req.user.id
+            },
+            attributes:["id","title","createdAt"],
+            include:[{
+          model: Message,
+          attributes: ['id', 'userMessage', 'aiResponse', 'createdAt'],
+          order: [['createdAt', 'ASC']],
+        },],
+        })
+        if(!chatroom){
+            return res.status(404).json({status:"error",message:"Chatroom not found or access denied"})
+        }
+        return res.status(200).json(
+            {
+                status:"success",
+                message:"Chatroom retrieves successfully",
+                chatroom:{
+                    id:chatroom.id,
+                    title:chatroom.title,
+                    createdAt:chatroom.createdAt,
+                    message:chatroom.Messages
+                }
+            }
+        )
+    } catch (error) {
+        console.log("Error fetching chatroom details",error.message)
+        return res.status(500).json({status:"error",message:error.message})
+    }
+})
+
 module.exports = router;
