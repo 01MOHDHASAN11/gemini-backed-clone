@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "start": "nodemon index.js",
+    "start": "node index.js",
     "worker": "node queue/worker.js",
     "dev": "nodemon index.js"
   },
