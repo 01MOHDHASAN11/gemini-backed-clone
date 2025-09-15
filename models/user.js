@@ -19,6 +19,8 @@ User.init({
     type: DataTypes.DATE, 
     defaultValue: DataTypes.NOW 
   },
+  stripeCustomerId: { type: DataTypes.STRING, allowNull: true }, 
+  stripeSubscriptionId: { type: DataTypes.STRING, allowNull: true } 
 }, {
   sequelize,
   modelName: 'User'
