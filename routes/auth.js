@@ -13,7 +13,7 @@ const mockPayment = require('../utils/mockPayment');
 require("dotenv").config({ path: `${process.cwd()}/.env` });
 const {body,validationResult} = require("express-validator")
 const rateLimitBasic = require("../middleware/rateLimit")
-
+const {connection} = require("../queue/geminiQueue")
 router.post("/auth/signup", async (req, res) => {
   try {
     const { mobile, password } = req.body;
@@ -241,6 +241,72 @@ router.get("/chatroom/:id",authenticate,async(req,res)=>{
 })
 
 
+// router.post("/chatroom/:id/message", authenticate, rateLimitBasic, async (req, res) => {
+//   try {
+//     const { id: chatroomId } = req.params;
+//     const { message: userMessage } = req.body;
+    
+//     if (!userMessage) {
+//       return res.status(400).json({ 
+//         status: "error", 
+//         message: "Message is required" 
+//       });
+//     }
+
+//     const chatroom = await Chatroom.findOne({
+//       where: { id: chatroomId, userId: req.user.id }
+//     });
+    
+//     if (!chatroom) {
+//       return res.status(404).json({ 
+//         status: "error", 
+//         message: "Chatroom not found" 
+//       });
+//     }
+
+//     const today = new Date();
+//     today.setHours(0, 0, 0, 0);
+    
+//     if (req.user.subscriptionTier === 'basic') {
+//       if (req.user.lastPromptDate < today) {
+//         req.user.dailyPromptsUsed = 0;
+//         req.user.lastPromptDate = new Date();
+//         await req.user.save();
+//       }
+      
+//       if (req.user.dailyPromptsUsed >= 5) {
+//         return res.status(429).json({ 
+//           status: "error", 
+//           message: "Daily limit exceeded. Upgrade to pro for unlimited access." 
+//         });
+//       }
+//     }
+
+//     await geminiQueue.add('process-message', {
+//       userMessage,
+//       chatroomId,
+//       userId: req.user.id
+//     });
+
+//     await Message.create({
+//       chatroomId,
+//       userMessage,
+//       aiResponse: null 
+//     });
+
+//     return res.status(202).json({ 
+//       status: "success", 
+//       message: "Message is being processed" 
+//     });
+//   } catch (error) {
+//     console.error("Error sending message:", error.message);
+//     return res.status(500).json({ 
+//       status: "error", 
+//       message: error.message 
+//     });
+//   }
+// });
+
 router.post("/chatroom/:id/message", authenticate, rateLimitBasic, async (req, res) => {
   try {
     const { id: chatroomId } = req.params;
@@ -282,21 +348,25 @@ router.post("/chatroom/:id/message", authenticate, rateLimitBasic, async (req, r
       }
     }
 
-    await geminiQueue.add('process-message', {
-      userMessage,
-      chatroomId,
-      userId: req.user.id
-    });
-
-    await Message.create({
+    // Create message first with null response
+    const messageRecord = await Message.create({
       chatroomId,
       userMessage,
       aiResponse: null 
     });
 
+    // Add job to queue with message ID
+    await geminiQueue.add('process-message', {
+      userMessage,
+      chatroomId,
+      userId: req.user.id,
+      messageId: messageRecord.id // Pass the message ID to the worker
+    });
+
     return res.status(202).json({ 
       status: "success", 
-      message: "Message is being processed" 
+      message: "Message is being processed",
+      messageId: messageRecord.id
     });
   } catch (error) {
     console.error("Error sending message:", error.message);
@@ -306,7 +376,6 @@ router.post("/chatroom/:id/message", authenticate, rateLimitBasic, async (req, r
     });
   }
 });
-
 
 router.get("/user/me", authenticate, async (req, res) => {
   try {
